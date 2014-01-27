@@ -10,7 +10,8 @@ start(QmlFile) ->
 	proc_lib:start(eqml, init, [QmlFile]).
 
 init(QmlFile) ->
-	Port = open_port({spawn, "./eqml " ++ QmlFile}, [{packet, 4}, binary, nouse_stdio]),
+	PortName = filename:join(filename:dirname(code:which(eqml)), "eqml"),
+	Port = open_port({spawn, PortName ++ " " ++ QmlFile}, [{packet, 4}, binary, nouse_stdio]),
 	erlang:register(eqml, Port),
 	proc_lib:init_ack(ok), 
 
