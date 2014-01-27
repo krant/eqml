@@ -380,8 +380,13 @@ void eqmlLog(QtMsgType type, const QMessageLogContext & ctx, const QString & msg
 int main(int argc, char *argv[])
 {
 	qInstallMessageHandler(eqmlLog);
-    QApplication app(argc, argv);
+	QApplication app(argc, argv);
 	erl_init(NULL, 0);
+
+	if (app.arguments().size() < 2) {
+		qWarning("No QML file specified");
+		return -1;
+	}
 
 	eqmlPipe pipe;
 	eqmlWindow win(app.arguments().at(1));
@@ -390,7 +395,7 @@ int main(int argc, char *argv[])
 	win.connect(&pipe, SIGNAL(packet(QByteArray)), SLOT(dispatch(QByteArray)));
 
 	pipe.start();
-    return app.exec();
+	return app.exec();
 }
 
 #include "eqml.moc"
