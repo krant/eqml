@@ -1,4 +1,4 @@
-# Erlang <-> QML bindings
+# Erlang ⇔ QML bindings
 
 This package is in a pre-alpha stage.
 
@@ -12,7 +12,7 @@ To try the eqml you'll need:
 
 Demo
 -----
-Compile and run erlang:
+Compile eqml and run erlang:
 
 	make
 	erl
@@ -30,7 +30,7 @@ Window color will change to yellow. Now let's check how you can subscribe to QML
 Erlang console will hang, waiting for message to come. Now click on green square. Erlang will print:
 
 	{hello,"bro"}
-That's it. Let's check the final feature, QML function invokation from Erlang:
+That's it. Let's check the final feature, QML function invocation from Erlang:
 	eqml:invoke(foo, scramble, "wtf").
 QML will print to console:
 
