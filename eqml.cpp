@@ -1,5 +1,6 @@
-#include <erl_interface.h>
+#include <ei.h>
 #include <QThread>
+#include <QDateTime>
 #include <QtWidgets/QApplication>
 #include <QtQuick/QQuickView>
 #include <QtQuick/QQuickItem>
@@ -7,64 +8,106 @@
 
 class eqmlTerm
 {
-	ETERM * m_term;
+	const char * _buf;
+	int _index;
+	int _type;
+	int _arity;
+	int _size;
 public:
 	eqmlTerm(const eqmlTerm &);
-
-	eqmlTerm(ETERM * term) : m_term(term)
+	eqmlTerm(const char * buf, int index = 0) : _buf(buf), _index(index)
 	{
+		if (index == 0)
+			ei_decode_version(_buf, &_index, NULL);
+
+		ei_get_type(_buf, &_index, &_type, &_size);
+		
+		if (isTuple())
+			ei_decode_tuple_header(_buf, &_index, &_arity);
 	}
 
-	eqmlTerm(QByteArray & buffer)
+	eqmlTerm operator[] (int elem) const
 	{
-		m_term = erl_decode((unsigned char *)buffer.data());
+		int idx = _index;
+		for (int i = 1; i < elem; ++i)
+			ei_skip_term(_buf, &idx);
+
+		return eqmlTerm(_buf, idx);
 	}
 
-	~eqmlTerm()
+	QByteArray atom() const
 	{
-		erl_free_term(m_term);
+		int idx = _index; char p[MAXATOMLEN];
+		ei_decode_atom(_buf, &idx, p);
+		return QByteArray(p);
 	}
 
-	eqmlTerm operator [] (int i) const
-	{
-		int size = erl_size(m_term);
-		if (i <= 0 || i > size)
-			qWarning("can't take %d element from tuple with arity %d", i, size);
-
-		return eqmlTerm(erl_element(i, m_term));
+	bool isTuple() const
+	{ 
+		return _type == ERL_SMALL_TUPLE_EXT || _type == ERL_LARGE_TUPLE_EXT;
 	}
 
-	QString atom() const
-	{
-		if (ERL_IS_ATOM(m_term))
-			return QString(ERL_ATOM_PTR(m_term));
-
-		qWarning("can't cast term to atom");
-		return QString("undefined");
+	bool isDouble() const
+	{ 
+		return _type == ERL_FLOAT_EXT || _type == NEW_FLOAT_EXT;
 	}
 
-	bool isInteger() const { return ERL_IS_INTEGER(m_term); }
-	bool isFloat()   const { return ERL_IS_FLOAT(m_term);   }
-	bool isAtom()    const { return ERL_IS_ATOM(m_term);    }
-	bool isTuple()   const { return ERL_IS_TUPLE(m_term);   }
-	bool isList()    const { return ERL_IS_LIST(m_term);    }
+	bool isAtom() const
+	{ 
+		return 
+			_type == ERL_ATOM_EXT ||
+			_type == ERL_SMALL_ATOM_EXT ||
+			_type == ERL_ATOM_UTF8_EXT ||
+			_type == ERL_SMALL_ATOM_UTF8_EXT;
+	}
+
+	bool isInteger() const
+	{ 
+		return 
+			_type == ERL_INTEGER_EXT ||
+			_type == ERL_SMALL_INTEGER_EXT ||
+			_type == ERL_SMALL_BIG_EXT ||
+			_type == ERL_LARGE_BIG_EXT;
+	}
+
+	bool isString() const
+	{ 
+		return 
+			_type == ERL_LIST_EXT ||
+			_type == ERL_STRING_EXT ||
+			_type == ERL_NIL_EXT;
+	}
+
+	bool toBool() const
+	{
+		QByteArray a = atom();
+		if (a == "true" ) return true;
+		if (a == "false") return false;
+
+		qWarning("can't cast term to bool");
+		return false;
+	}
 
 	int toInteger() const
 	{ 
-		return ERL_INT_VALUE(m_term);
+		int idx = _index; long p;
+		ei_decode_long(_buf, &idx, &p);
+		return p;
 	}
 
-	float toFloat() const
+	double toDouble() const
 	{ 
-		return ERL_FLOAT_VALUE(m_term);
+		int idx = _index; double p;
+		ei_decode_double(_buf, &idx, &p);
+		return p;
 	}
 
-	float toScalar() const
+	double toScalar() const
 	{
 		if (isInteger())
 			return toInteger();
-		if (isFloat())
-			return toFloat();
+		if (isDouble())
+			return toDouble();
 
 		qWarning("can't cast term to scalar");
 		return 0.0;
@@ -72,173 +115,97 @@ public:
 
 	QString toString() const
 	{
-		char * s = erl_iolist_to_string(m_term);
-		QString res(s);
-		erl_free(s);
-		return res;
+		int idx = _index; QByteArray a(_size, 0);
+		ei_decode_string(_buf, &idx, a.data());
+		return QString(a);
 	}
 
 	QByteArray toArray() const
 	{
+		int idx = _index; QByteArray a(_size, 0);
 		if (isAtom())
-			return QByteArray(ERL_ATOM_PTR(m_term));
+			ei_decode_atom(_buf, &idx, a.data());
+		else
+			ei_decode_string(_buf, &idx, a.data());
 
-		char * s = erl_iolist_to_string(m_term);
-		QByteArray res(s);
-		erl_free(s);
-		return res;
+		return a;
 	}
 };
 
-class eqmlDepot
-{
-	typedef QVariant (eqmlDepot::*Handle)(const eqmlTerm &);
-	typedef QMap<QByteArray, Handle> Registry;
-	Registry registry;
-
-	QVariant url(const eqmlTerm & t)
-	{
-		return QUrl(t.toString());
-	}
-
-	QVariant point(const eqmlTerm & t)
-	{
-		return QPointF(t[1].toScalar(), t[2].toScalar());
-	}
-
-public:
-	eqmlDepot()
-	{
-		registry["url"] = &eqmlDepot::url;
-		registry["point"] = &eqmlDepot::point;
-	}
-
-	QVariant var(const eqmlTerm & t)
-	{
-		if (t.isInteger())
-			return t.toInteger();
-		else if (t.isFloat())
-			return t.toFloat();
-		else if (t.isList())
-			return t.toString();
-		else if (t.isTuple())
-		{
-			QByteArray tag = t[1].toArray();
-
-			Registry::iterator it = registry.find(tag);
-			if (it != registry.end())
-				return (this->*it.value())(t[2]);
-			else
-				qWarning("unknown tag \'%s\'", tag.data());
-		}
-
-		qWarning("can't cast term to QVariant");
-		return QVariant();
-	}
-};
-/*
-class eqmlConnector
-{
-public:
-
-};
-*/
 class eqmlLink : public QObject
 {
 	Q_OBJECT
 
-	QDataStream & outStream;
+	char _buf[1024];
+	int _index;
+	QDataStream & _os;
 
-	QByteArray tag;
-	QByteArray pid;
-
-	void fire(const QVariantList & l)
+	void end(int index)
 	{
-		ETERM * terms[8];
+		_os << index;
+		_os.writeRawData(_buf, index);
+	}
 
-		terms[0] = erl_mk_atom("signal");
-		terms[1] = erl_mk_string(pid.data());
-		terms[2] = erl_mk_atom(tag.data());
-
-		for (int i = 0; i < l.size(); ++i)
+	int push(int index, const QVariant & v)
+	{
+		switch (v.type())
 		{
-			const QVariant & v = l.at(i);
-			switch (v.type())
-			{
-				case QMetaType::Int:
-					terms[i + 3] = erl_mk_int(v.toInt());
-					break;
-				case QMetaType::Double:
-					terms[i + 3] = erl_mk_float(v.toFloat());
-					break;
-				case QMetaType::QString:
-					terms[i + 3] = erl_mk_string(qPrintable(v.toString()));
-					break;
-				default:
-					qWarning("can't cast QVariant to term");
-			}
+			case QMetaType::Int:
+				ei_encode_long(_buf, &index, v.toInt());
+				break;
+			case QMetaType::Double:
+				ei_encode_double(_buf, &index, v.toDouble());
+				break;
+			case QMetaType::QString:
+				ei_encode_string(_buf, &index, qPrintable(v.toString()));
+				break;
+			default:
+				qWarning("can't cast QVariant to term");
 		}
-
-		ETERM * tuple = erl_mk_tuple(terms, l.size() + 3);
-
-		int len = erl_term_len(tuple);
-		char * buf = new char[len+1];
-		erl_encode(tuple, (unsigned char *)buf);
-
-		outStream << len;
-		outStream.writeRawData(buf, len);
-
-		delete[] buf;
-		erl_free_compound(tuple);
+		return index;
 	}
 
 public:
-	eqmlLink(QDataStream & _outStream, const QByteArray & _tag, const QByteArray & _pid)
-		: outStream(_outStream), tag(_tag), pid(_pid)
+	eqmlLink(QDataStream & os, const QByteArray & tag, const QByteArray & pid, int order) 
+		: _index(0)
+		, _os(os)
 	{
+		ei_encode_version(_buf, &_index);
+		ei_encode_tuple_header(_buf, &_index, order + 3);
+		ei_encode_atom(_buf, &_index, "signal");
+		ei_encode_string(_buf, &_index, pid.data());
+		ei_encode_atom(_buf, &_index, tag.data());
 	}
 
 public slots:
 	void link()
 	{
-		QVariantList l;
-		fire(l);
+		end(_index);
 	}
 
-	void link(const QVariant & a)
+	void link(const QVariant& a)
 	{
-		QVariantList l;
-		l.push_back(a);
-		fire(l);
+		end(push(_index, a));
 	}
 
-	void link(const QVariant & a, const QVariant & b)
+	void link(const QVariant& a, const QVariant& b)
 	{
-		QVariantList l;
-		l.push_back(a);	l.push_back(b);
-		//fin(push(push(prep(),a),b))
-		fire(l);
+		end(push(push(_index, a), b));
 	}
 
-	void link(const QVariant & a, const QVariant & b, const QVariant & c)
+	void link(const QVariant& a, const QVariant& b, const QVariant& c)
 	{
-		QVariantList l;
-		l.push_back(a);	l.push_back(b);	l.push_back(c);
-		fire(l);
+		end(push(push(push(_index, a), b), c));
 	}
 
-	void link(const QVariant & a, const QVariant & b, const QVariant & c, const QVariant & d)
+	void link(const QVariant& a, const QVariant& b, const QVariant& c, const QVariant& d)
 	{
-		QVariantList l;
-		l.push_back(a);	l.push_back(b);	l.push_back(c);	l.push_back(d);
-		fire(l);
+		end(push(push(push(push(_index, a), b), c), d));
 	}
 
-	void link(const QVariant & a, const QVariant & b, const QVariant & c, const QVariant & d, const QVariant & e)
+	void link(const QVariant& a, const QVariant& b, const QVariant& c, const QVariant& d, const QVariant& e)
 	{
-		QVariantList l;
-		l.push_back(a);	l.push_back(b);	l.push_back(c);	l.push_back(d); l.push_back(e);
-		fire(l);
+		end(push(push(push(push(push(_index, a), b), c), d), e));
 	}
 };
 
@@ -279,19 +246,25 @@ class eqmlWindow : public QQuickView
 	typedef QMap<QByteArray, Handle> Registry;
 	Registry registry;
 
-	eqmlDepot depot;
-
 	QFile outFile;
 	QDataStream outStream;
 
-	QObject * find(const QByteArray & a)
+	typedef QVariant (eqmlWindow::*VarFun)(const eqmlTerm &);
+	typedef QMap<QByteArray, VarFun> VarMap;
+	VarMap _varMap;
+
+	QObject * find(const eqmlTerm & term)
 	{
-		QObject * obj = rootObject()->findChild<QObject *>(a);
-		if (obj == NULL && a == "root")
-			obj = rootObject();
-		if (!obj)
-			qWarning("can't find child %s", a.data());
-		return obj;
+		QByteArray name = term.toArray();
+		QObject * root = rootObject();
+
+		if (root->objectName() == name)
+			return root;
+		if (QObject * obj = root->findChild<QObject *>(name))
+			return obj;
+
+		qWarning("can't find child %s", name.data());
+		return NULL;
 	}
 
 public:
@@ -307,20 +280,70 @@ public:
 		outStream.setDevice(&outFile);
 
 		registry["connect"] = &eqmlWindow::onConnect;
-		registry["invoke"] = &eqmlWindow::onInvoke;
 		registry["set"] = &eqmlWindow::onSet;
+		registry["invoke0"] = &eqmlWindow::onInvoke0;
+		registry["invoke1"] = &eqmlWindow::onInvoke1;
+		registry["invoke2"] = &eqmlWindow::onInvoke2;
+		registry["invoke3"] = &eqmlWindow::onInvoke3;
+
+		_varMap["url"] = &eqmlWindow::url;
+		_varMap["point"] = &eqmlWindow::point;
+		_varMap["datetime"] = &eqmlWindow::datetime;
+	}
+
+	QVariant var(const eqmlTerm & t)
+	{
+		if (t.isInteger())
+			return t.toInteger();
+		else if (t.isDouble())
+			return t.toDouble();
+		else if (t.isString())
+			return t.toString();
+		else if (t.isAtom())
+			return t.toBool();
+		else if (t.isTuple()) {
+			QByteArray tag = t[1].toArray();
+
+			VarMap::iterator it = _varMap.find(tag);
+			if (it != _varMap.end())
+				return (this->*it.value())(t[2]);
+			else
+				qWarning("unknown var \'%s\'", tag.data());
+		}
+
+		qWarning("can't cast term to QVariant");
+		return QVariant();
+	}
+
+	QVariant url(const eqmlTerm & t)
+	{
+		return QUrl(t.toString());
+	}
+
+	QVariant point(const eqmlTerm & t)
+	{
+		return QPointF(t[1].toScalar(), t[2].toScalar());
+	}
+
+	QVariant datetime(const eqmlTerm & t)
+	{
+		const eqmlTerm & date = t[1];
+		const eqmlTerm & time = t[2];
+
+		return QDateTime(
+			QDate(date[1].toInteger(), date[2].toInteger(), date[3].toInteger()),
+			QTime(time[1].toInteger(), time[2].toInteger(), time[3].toInteger())
+		);
 	}
 
 	void onConnect(const eqmlTerm & term)
 	{
-		QObject * obj = find(term[1].toArray());
+		QObject * obj = find(term[1]);
 		if (!obj)
 			return;
 
 		QByteArray signalName = term[2].toArray();
-		QByteArray tag = term[3].toArray();
 		int order = term[4].toInteger();
-		QByteArray pid = term[5].toArray();
 
 		QByteArray Args = "(";
 		for (int i = 0; i < order; i++)
@@ -334,7 +357,8 @@ public:
 		int signalIdx = obj->metaObject()->indexOfSignal(signalName.append(Args));
 		QMetaMethod signalMethod = obj->metaObject()->method(signalIdx);
 
-		eqmlLink * link = new eqmlLink(outStream, tag, pid);
+		eqmlLink * link = new eqmlLink(
+			outStream, term[3].toArray(), term[5].toArray(), order);
 
 		int slotIdx = link->metaObject()->indexOfSlot(Args.prepend("link"));
 		QMetaMethod slotMethod = link->metaObject()->method(slotIdx);
@@ -343,45 +367,62 @@ public:
 			qWarning("connection fail");
 	}	
 
-	void onInvoke(const eqmlTerm & term)
+	void onInvoke0(const eqmlTerm & t)
 	{
-		QObject * obj = find(term[1].toArray());
-		if (obj)
-			QMetaObject::invokeMethod(obj, term[2].toArray());
-	}	
+		if (QObject * obj = find(t[1]))
+			QMetaObject::invokeMethod(obj, t[2].toArray());
+	}
 
-	void onSet(const eqmlTerm & term)
+	void onInvoke1(const eqmlTerm & t)
 	{
-		QObject * obj = find(term[1].toArray());
-		if (obj)
-			obj->setProperty(term[2].toArray(),	depot.var(term[3]));
+		if (QObject * obj = find(t[1]))
+			QMetaObject::invokeMethod(obj, t[2].toArray(),
+				Q_ARG(QVariant, var(t[3])));
+	}
+
+	void onInvoke2(const eqmlTerm & t)
+	{
+		if (QObject * obj = find(t[1]))
+			QMetaObject::invokeMethod(obj, t[2].toArray(),
+				Q_ARG(QVariant, var(t[3])), Q_ARG(QVariant, var(t[4])));
+	}
+
+	void onInvoke3(const eqmlTerm & t)
+	{
+		if (QObject * obj = find(t[1]))
+			QMetaObject::invokeMethod(obj, t[2].toArray(),
+				Q_ARG(QVariant, var(t[3])), Q_ARG(QVariant, var(t[4])), Q_ARG(QVariant, var(t[5])));
+	}
+
+	void onSet(const eqmlTerm & t)
+	{
+		if (QObject * obj = find(t[1]))
+			obj->setProperty(t[2].toArray(), var(t[3]));
 	}
 
 public slots:
 	void dispatch(QByteArray buffer)
 	{
-		eqmlTerm term(buffer);
+		eqmlTerm term(buffer.data());
 		QByteArray tag = term[1].toArray();
 
 		Registry::iterator it = registry.find(tag);
 		if (it != registry.end())
 			(this->*it.value())(term[2]);
 		else
-			qWarning("unknown tag \'%s\'", tag.data());
+			qWarning("unknown tag \'%s\', size=%d", tag.data(), tag.size());
 	}
 };
 
-void eqmlLog(QtMsgType type, const QMessageLogContext & ctx, const QString & msg)
+void eqmlLog(QtMsgType, const QMessageLogContext &, const QString & msg)
 {
-	type = type;
-	fprintf(stderr, "%s:%u: %s\r\n", ctx.file, ctx.line, qPrintable(msg));
+	fprintf(stderr, "%s\r\n", qPrintable(msg));
 }
 
 int main(int argc, char *argv[])
 {
 	qInstallMessageHandler(eqmlLog);
 	QApplication app(argc, argv);
-	erl_init(NULL, 0);
 
 	if (app.arguments().size() < 2) {
 		qWarning("No QML file specified");
