@@ -31,6 +31,7 @@ Erlang console will hang, waiting for message to come. Now click on green square
 
 	{hello,"bro"}
 That's it. Let's check the final feature, QML function invocation from Erlang:
+
 	eqml:invoke(foo, scramble, "wtf").
 QML will print to console:
 

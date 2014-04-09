@@ -8,8 +8,8 @@ Rectangle {
 
 	Rectangle {
 		objectName: 'bar'
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.verticalCenter: parent.verticalCenter
+		anchors.horizontalCenter: parent.horizontalCenter
+		anchors.verticalCenter: parent.verticalCenter
 		width: 100
 		height: 100
 		color: "green"

@@ -1,10 +1,10 @@
 #include <ei.h>
 #include <QThread>
 #include <QDateTime>
-#include <QtWidgets/QApplication>
-#include <QtQuick/QQuickView>
-#include <QtQuick/QQuickItem>
-#include <QtQml/QQmlEngine>
+#include <QApplication>
+#include <QQuickView>
+#include <QQuickItem>
+#include <QQmlEngine>
 
 class eqmlTerm
 {
@@ -166,15 +166,29 @@ class eqmlLink : public QObject
 	}
 
 public:
-	eqmlLink(QDataStream & os, const QByteArray & tag, const QByteArray & pid, int order) 
+	eqmlLink(QDataStream & os, QObject * obj, const eqmlTerm & term)
 		: _index(0)
 		, _os(os)
 	{
+		int order = term[4].toInteger();
+
+		QByteArray Args = "(" + QByteArray("QVariant").repeated(order) + ")";
+		Args.replace("tQ", "t,Q");
+
+		int signalIdx = obj->metaObject()->indexOfSignal(term[2].toArray() + Args);
+		QMetaMethod signalMethod = obj->metaObject()->method(signalIdx);
+
+		int slotIdx = metaObject()->indexOfSlot("link" + Args);
+		QMetaMethod slotMethod = metaObject()->method(slotIdx);
+
+		if (!QObject::connect(obj, signalMethod, this, slotMethod))
+			qWarning("connection fail");
+
 		ei_encode_version(_buf, &_index);
 		ei_encode_tuple_header(_buf, &_index, order + 3);
 		ei_encode_atom(_buf, &_index, "signal");
-		ei_encode_string(_buf, &_index, pid.data());
-		ei_encode_atom(_buf, &_index, tag.data());
+		ei_encode_string(_buf, &_index, term[5].toArray().data());
+		ei_encode_atom(_buf, &_index, term[3].toArray().data());
 	}
 
 public slots:
@@ -342,29 +356,7 @@ public:
 		if (!obj)
 			return;
 
-		QByteArray signalName = term[2].toArray();
-		int order = term[4].toInteger();
-
-		QByteArray Args = "(";
-		for (int i = 0; i < order; i++)
-		{			
-			Args.append("QVariant");
-			if (i < order - 1)
-				Args.append(",");
-		}
-		Args.append(")");
-
-		int signalIdx = obj->metaObject()->indexOfSignal(signalName.append(Args));
-		QMetaMethod signalMethod = obj->metaObject()->method(signalIdx);
-
-		eqmlLink * link = new eqmlLink(
-			outStream, term[3].toArray(), term[5].toArray(), order);
-
-		int slotIdx = link->metaObject()->indexOfSlot(Args.prepend("link"));
-		QMetaMethod slotMethod = link->metaObject()->method(slotIdx);
-
-		if (!QObject::connect(obj, signalMethod, link, slotMethod))
-			qWarning("connection fail");
+		new eqmlLink(outStream, obj, term);
 	}	
 
 	void onInvoke0(const eqmlTerm & t)
