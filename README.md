@@ -8,7 +8,7 @@ Installation
 To try the eqml you'll need:
 
  * Erlang
- * Qt 5
+ * Qt 5.3
 
 Demo
 -----

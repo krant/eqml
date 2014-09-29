@@ -5,6 +5,7 @@
 #include <QQuickView>
 #include <QQuickItem>
 #include <QQmlEngine>
+#include <QJSValue>
 
 class eqmlTerm
 {
@@ -21,7 +22,7 @@ public:
 			ei_decode_version(_buf, &_index, NULL);
 
 		ei_get_type(_buf, &_index, &_type, &_size);
-		
+
 		if (isTuple())
 			ei_decode_tuple_header(_buf, &_index, &_arity);
 	}
@@ -43,18 +44,18 @@ public:
 	}
 
 	bool isTuple() const
-	{ 
+	{
 		return _type == ERL_SMALL_TUPLE_EXT || _type == ERL_LARGE_TUPLE_EXT;
 	}
 
 	bool isDouble() const
-	{ 
+	{
 		return _type == ERL_FLOAT_EXT || _type == NEW_FLOAT_EXT;
 	}
 
 	bool isAtom() const
-	{ 
-		return 
+	{
+		return
 			_type == ERL_ATOM_EXT ||
 			_type == ERL_SMALL_ATOM_EXT ||
 			_type == ERL_ATOM_UTF8_EXT ||
@@ -62,8 +63,8 @@ public:
 	}
 
 	bool isInteger() const
-	{ 
-		return 
+	{
+		return
 			_type == ERL_INTEGER_EXT ||
 			_type == ERL_SMALL_INTEGER_EXT ||
 			_type == ERL_SMALL_BIG_EXT ||
@@ -71,8 +72,8 @@ public:
 	}
 
 	bool isString() const
-	{ 
-		return 
+	{
+		return
 			_type == ERL_LIST_EXT ||
 			_type == ERL_STRING_EXT ||
 			_type == ERL_NIL_EXT;
@@ -89,14 +90,14 @@ public:
 	}
 
 	int toInteger() const
-	{ 
+	{
 		int idx = _index; long p;
 		ei_decode_long(_buf, &idx, &p);
 		return p;
 	}
 
 	double toDouble() const
-	{ 
+	{
 		int idx = _index; double p;
 		ei_decode_double(_buf, &idx, &p);
 		return p;
@@ -172,7 +173,7 @@ public:
 	{
 		int order = term[4].toInteger();
 
-		QByteArray Args = "(" + QByteArray("QVariant").repeated(order) + ")";
+		QByteArray Args = "(" + QByteArray("QJSValue").repeated(order) + ")";
 		Args.replace("tQ", "t,Q");
 
 		int signalIdx = obj->metaObject()->indexOfSignal(term[2].toArray() + Args);
@@ -197,29 +198,29 @@ public slots:
 		end(_index);
 	}
 
-	void link(const QVariant& a)
+	void link(const QJSValue& a)
 	{
-		end(push(_index, a));
+		end(push(_index, a.toVariant()));
 	}
 
-	void link(const QVariant& a, const QVariant& b)
+	void link(const QJSValue& a, const QJSValue& b)
 	{
-		end(push(push(_index, a), b));
+		end(push(push(_index, a.toVariant()), b.toVariant()));
 	}
 
-	void link(const QVariant& a, const QVariant& b, const QVariant& c)
+	void link(const QJSValue& a, const QJSValue& b, const QJSValue& c)
 	{
-		end(push(push(push(_index, a), b), c));
+		end(push(push(push(_index, a.toVariant()), b.toVariant()), c.toVariant()));
 	}
 
-	void link(const QVariant& a, const QVariant& b, const QVariant& c, const QVariant& d)
+	void link(const QJSValue& a, const QJSValue& b, const QJSValue& c, const QJSValue& d)
 	{
-		end(push(push(push(push(_index, a), b), c), d));
+		end(push(push(push(push(_index, a.toVariant()), b.toVariant()), c.toVariant()), d.toVariant()));
 	}
 
-	void link(const QVariant& a, const QVariant& b, const QVariant& c, const QVariant& d, const QVariant& e)
+	void link(const QJSValue& a, const QJSValue& b, const QJSValue& c, const QJSValue& d, const QJSValue& e)
 	{
-		end(push(push(push(push(push(_index, a), b), c), d), e));
+		end(push(push(push(push(push(_index, a.toVariant()), b.toVariant()), c.toVariant()), d.toVariant()), e.toVariant()));
 	}
 };
 
@@ -230,7 +231,7 @@ public:
 	void run()
 	{
 		QFile inFile;
-		inFile.open(3, QIODevice::ReadOnly | QIODevice::Unbuffered);		
+		inFile.open(3, QIODevice::ReadOnly | QIODevice::Unbuffered);
 		QDataStream inStream(&inFile);
 
 		QByteArray buffer;
@@ -357,7 +358,7 @@ public:
 			return;
 
 		new eqmlLink(outStream, obj, term);
-	}	
+	}
 
 	void onInvoke0(const eqmlTerm & t)
 	{
