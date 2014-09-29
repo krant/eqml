@@ -1,4 +1,5 @@
 import QtQuick 2.2
+import QtQml 2.0
 
 Rectangle {
 	objectName: 'foo'
